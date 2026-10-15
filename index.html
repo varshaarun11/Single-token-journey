@@ -19,11 +19,9 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);padd
 .fig{max-width:760px;margin:0 auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 16px 14px}
 .fig svg{display:block;width:100%;height:auto}
 button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.seg{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:16px 0 4px;font-size:14px}
-.seg span{color:var(--muted);margin-right:4px}
-.seg button{font:inherit;color:var(--ink);background:transparent;border:1px solid var(--line);border-radius:8px;padding:6px 14px;cursor:pointer}
-.seg button:hover{border-color:var(--muted)}
-.seg button[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-wash);color:var(--accent)}
+.bar{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin:16px 0 4px;font-size:14px}
+.bar button{font:inherit;color:var(--accent);background:var(--accent-wash);border:1px solid var(--accent);border-radius:8px;padding:6px 14px;cursor:pointer}
+.bar button:hover{filter:brightness(0.97)}
 #readout{font-size:14px;color:var(--muted);margin:6px 0 0}
 svg text{font-family:var(--sans)}
 .t{font-size:14px;font-weight:600;fill:var(--ink)}
@@ -53,17 +51,14 @@ svg text{font-family:var(--sans)}
 <figure class="fig" style="margin:0 auto">
   <svg id="flowsvg" viewBox="0 0 680 212" role="img" aria-labelledby="flow-t flow-d">
     <title id="flow-t">Single token across an internal referral</title>
-    <desc id="flow-d">Token GM-014 is issued at registration, waits in the General medicine queue, is consulted, referred, and joins the Cardiology queue without a new token. The dashed loop shows today's flow, where the patient goes back to registration for a new token.</desc>
+    <desc id="flow-d">Token GM-014 is issued at registration, waits in the General medicine queue, is consulted, referred, and joins the end of the Cardiology queue without a new token. The dashed loop shows today's flow, where the patient goes back to registration for a new token.</desc>
   </svg>
-  <div class="seg" role="group" aria-label="Referral priority">
-    <span>Referral priority</span>
-    <button type="button" data-p="Routine" aria-pressed="true">Routine</button>
-    <button type="button" data-p="Priority" aria-pressed="false">Priority</button>
-    <button type="button" data-p="Emergency" aria-pressed="false">Emergency</button>
+  <div class="bar">
+    <button type="button" id="replay">Replay referral</button>
   </div>
   <svg id="queuesvg" viewBox="0 0 680 172" role="img" aria-labelledby="q-t q-d">
     <title id="q-t">Cardiology queue</title>
-    <desc id="q-d">Queue of tokens in Cardiology. Regular tokens show only a token number. Referred tokens show a priority and their source department, and the priority decides their position.</desc>
+    <desc id="q-d">Queue of tokens in Cardiology. The referred token GM-014 is added to the end of the existing queue and keeps its original number. No clinical priority is shown.</desc>
   </svg>
   <p id="readout" aria-live="polite"></p>
 </figure>
@@ -87,7 +82,7 @@ var nodes=[
   {t:'Register',s:'GM-014 issued'},
   {t:'GM queue',s:'Gen. medicine'},
   {t:'Consult',s:'Doctor decides'},
-  {t:'Refer',s:'Dept + priority',n:true},
+  {t:'Refer',s:'Dept + doctor',n:true},
   {t:'CA queue',s:'Cardiology'}
 ];
 function NX(i){return 22+i*132;}
@@ -129,7 +124,6 @@ if(reduce){
   setInterval(function(){step((cur+1)%5);},1700);
 }
 
-var PRI={Routine:'#888780',Priority:'#EF9F27',Emergency:'#E24B4A'};
 var q=document.getElementById('queuesvg');
 function qx(k){return 27+k*106;}
 var CY=76;
@@ -141,65 +135,50 @@ tx(q,52,57,'Ongoing','s ok','start').setAttribute('style','font-weight:600');
 tx(q,133,57,'Waiting, called in order','s','start');
 var layer=el('g',{},q);
 
-var base=[
-  {id:'CA-009',c:true,t:0},
-  {id:'OR-006',r:true,p:'Priority',src:'Orthopedics',t:1},
-  {id:'CA-011',t:2},
-  {id:'CA-015',t:3},
-  {id:'CA-017',t:4}
+var queue=[
+  {id:'CA-009',c:true},
+  {id:'CA-011'},
+  {id:'OR-006',src:'Orthopedics'},
+  {id:'CA-015'},
+  {id:'CA-017'}
 ];
-var ref=null;
-function makeCard(d){
-  var g=el('g',{'class':'card'+(d.c?' ongoing':'')+(d.focus?' focus':'')},layer);
+function makeCard(d,focus){
+  var g=el('g',{'class':'card'+(d.c?' ongoing':'')+(focus?' focus':'')},layer);
   el('rect',{width:96,height:64,rx:8},g);
-  if(d.r){
-    tx(g,14,24,d.id,'t'+(d.focus?' a':''),'start');
-    el('circle',{cx:17,cy:46,r:4,fill:PRI[d.p]},g);
-    tx(g,28,46,d.p,'s'+(d.focus?' a':''),'start');
-    tx(g,48,84,'From '+d.src,'s'+(d.focus?' c':''));
-  }else{
-    tx(g,48,32,d.id,'t');
-  }
+  tx(g,48,32,d.id,'t'+(focus?' a':''));
+  if(d.src){tx(g,48,84,'From '+d.src,'s'+(focus?' c':''));}
   d.el=g;
   return g;
 }
-base.forEach(makeCard);
-function rank(d){return d.r&&d.p==='Emergency'?0:(d.r&&d.p==='Priority'?1:2);}
-function order(){
-  var items=base.slice();
-  if(ref){items.push(ref);}
-  var consult=items.filter(function(d){return d.c;});
-  var wait=items.filter(function(d){return !d.c;}).sort(function(a,b){return rank(a)-rank(b)||a.t-b.t;});
-  var all=consult.concat(wait);
-  all.forEach(function(d,i){d.slot=i;});
-  return all;
-}
+queue.forEach(function(d){makeCard(d,false);});
+var ref=null;
 function layout(){
-  var items=order();
-  items.forEach(function(d){
-    d.el.style.transform='translate('+qx(d.slot)+'px,'+CY+'px)';
+  var items=queue.slice();
+  if(ref){items.push(ref);}
+  items.forEach(function(d,i){
+    d.el.style.transform='translate('+qx(i)+'px,'+CY+'px)';
     d.el.style.opacity=1;
   });
   var ro=document.getElementById('readout');
   if(ref){
-    var ahead=ref.slot-1;
-    ro.textContent='GM-014 is waiting position '+ref.slot+' in Cardiology, with '+ahead+(ahead===1?' patient':' patients')+' ahead. Regular scan-and-register tokens carry no priority, and the ongoing consultation is never displaced.';
+    var pos=items.length-1;
+    ro.textContent='GM-014 joins the end of the Cardiology queue at waiting position '+pos+', with '+(pos-1)+' patients ahead. It keeps its original number, no clinical priority is captured, and the ongoing consultation is never displaced.';
+  }else{
+    ro.textContent='';
   }
 }
-function addRef(p){
-  ref={id:'GM-014',r:true,p:p,src:'General medicine',t:99,focus:true};
-  order();
-  var g=makeCard(ref);
-  g.style.transform='translate('+qx(ref.slot)+'px,'+(CY-34)+'px)';
+function addRef(){
+  ref={id:'GM-014',src:'General medicine'};
+  var g=makeCard(ref,true);
+  var slot=queue.length+1;
+  g.style.transform='translate('+qx(slot)+'px,'+(CY-34)+'px)';
   g.style.opacity=0;
   void g.getBoundingClientRect();
   layout();
 }
-var current='Routine';
-var buttons=document.querySelectorAll('.seg button');
-function pick(p){
-  current=p;
-  buttons.forEach(function(b){b.setAttribute('aria-pressed',b.getAttribute('data-p')===p?'true':'false');});
+var timer=null;
+function replay(){
+  if(timer){clearTimeout(timer);timer=null;}
   if(ref){
     var old=ref.el;
     old.style.opacity=0;
@@ -207,10 +186,10 @@ function pick(p){
     layout();
     setTimeout(function(){if(old.parentNode){old.parentNode.removeChild(old);}},300);
   }
-  setTimeout(function(){if(!ref&&current===p){addRef(p);}},reduce?0:320);
+  timer=setTimeout(function(){timer=null;if(!ref){addRef();}},reduce?0:420);
 }
-buttons.forEach(function(b){b.addEventListener('click',function(){pick(b.getAttribute('data-p'));});});
-addRef(current);
+document.getElementById('replay').addEventListener('click',replay);
+addRef();
 layout();
 })();
 </script>
